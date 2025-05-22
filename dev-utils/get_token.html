@@ -1,0 +1,172 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Firebase ID Token Getter</title>
+    <!-- Import Firebase SDKs -->
+    <script src="https://www.gstatic.com/firebasejs/9.6.10/firebase-app-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/9.6.10/firebase-auth-compat.js"></script>
+    <style>
+        body { font-family: sans-serif; margin: 20px; }
+        input, button { padding: 8px; margin: 5px 0; }
+        textarea { width: 90%; min-height: 100px; }
+        div { margin-bottom: 15px; }
+        .container { max-width: 700px; margin: auto; padding: 20px; border: 1px solid #ccc; border-radius: 8px; }
+        h1, h2 { color: #333; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>Firebase ID Token Getter</h1>
+
+        <div>
+            <h2>Firebase Config:</h2>
+            <p><strong>IMPORTANT:</strong> Ensure your Firebase project's config object is correctly pasted into the script section below.</p>
+        </div>
+
+        <hr>
+
+        <div>
+            <h2>Option 1: Sign In (Email/Password)</h2>
+            <input type="email" id="email" placeholder="Email" value="test@example.com" /><br />
+            <input type="password" id="password" placeholder="Password" value="password" /><br />
+            <button onclick="signInWithEmail()">Sign In with Email</button>
+        </div>
+
+        <hr>
+
+        <div>
+            <h2>Option 2: Sign In with Google</h2>
+            <button onclick="signInWithGoogle()">Sign In with Google</button>
+        </div>
+
+        <hr>
+
+        <div id="authActions" style="display:none;">
+             <button onclick="signOutUser()" id="signOutBtn">Sign Out</button>
+        </div>
+
+
+        <div id="userInfo" style="display:none;">
+            <h2>User Info:</h2>
+            <p><strong>UID:</strong> <span id="userUid"></span></p>
+            <p><strong>Email:</strong> <span id="userEmail"></span></p>
+            <p><strong>Display Name:</strong> <span id="userDisplayName"></span></p>
+        </div>
+
+        <div>
+            <h2>ID Token:</h2>
+            <textarea id="idToken" readonly placeholder="ID Token will appear here after sign-in..."></textarea>
+        </div>
+    </div>
+
+    <script>
+        // --- START: PASTE YOUR FIREBASE CONFIG OBJECT HERE ---
+        const firebaseConfig = {
+          apiKey: "AIzaSyD1YS56I5vzbbOm2Xo9pXEaSpbRiAoApG8",
+          authDomain: "sapariwar-2caf2.firebaseapp.com",
+          projectId: "sapariwar-2caf2",
+          storageBucket: "sapariwar-2caf2.firebasestorage.app",
+          messagingSenderId: "285186646884",
+          appId: "1:285186646884:web:67e576cd1aae8024079071",
+          measurementId: "G-978XQLQB1F"
+        };
+        // --- END: PASTE YOUR FIREBASE CONFIG OBJECT HERE ---
+
+        let app;
+        let auth;
+        try {
+            app = firebase.initializeApp(firebaseConfig);
+            auth = firebase.auth();
+            console.log("Firebase initialized successfully.");
+        } catch (e) {
+            console.error("Error initializing Firebase. Is the config correct?", e);
+            alert("Error initializing Firebase. Check console and ensure your firebaseConfig is correct in the HTML file.");
+            document.getElementById('idToken').value = "Error initializing Firebase. Check console.";
+        }
+
+        const emailInput = document.getElementById('email');
+        const passwordInput = document.getElementById('password');
+        const idTokenTextarea = document.getElementById('idToken');
+        const userInfoDiv = document.getElementById('userInfo');
+        const userUidSpan = document.getElementById('userUid');
+        const userEmailSpan = document.getElementById('userEmail');
+        const userDisplayNameSpan = document.getElementById('userDisplayName'); // Added for display name
+        const authActionsDiv = document.getElementById('authActions');
+
+        if (auth) {
+            auth.onAuthStateChanged(user => {
+                if (user) {
+                    console.log("User is signed in:", user);
+                    userInfoDiv.style.display = 'block';
+                    authActionsDiv.style.display = 'block';
+                    userUidSpan.textContent = user.uid;
+                    userEmailSpan.textContent = user.email;
+                    userDisplayNameSpan.textContent = user.displayName || 'N/A'; // Display name
+
+                    user.getIdToken(/* forceRefresh */ true)
+                        .then(function(idToken) {
+                            console.log("ID Token:", idToken);
+                            idTokenTextarea.value = idToken;
+                        }).catch(function(error) {
+                            console.error("Error getting ID token:", error);
+                            idTokenTextarea.value = "Error getting ID token: " + error.message;
+                        });
+                } else {
+                    console.log("User is signed out.");
+                    idTokenTextarea.value = "User is signed out. Please sign in.";
+                    userInfoDiv.style.display = 'none';
+                    authActionsDiv.style.display = 'none';
+                    userUidSpan.textContent = '';
+                    userEmailSpan.textContent = '';
+                    userDisplayNameSpan.textContent = '';
+                }
+            });
+        }
+
+        function signInWithEmail() {
+            if (!auth) { alert("Firebase auth not initialized."); return; }
+            const email = emailInput.value;
+            const password = passwordInput.value;
+            if (!email || !password) { alert("Please enter email and password."); return; }
+
+            auth.signInWithEmailAndPassword(email, password)
+                .then(userCredential => console.log("Signed in with email successfully:", userCredential.user))
+                .catch(error => {
+                    console.error("Error signing in with email:", error);
+                    idTokenTextarea.value = "Error signing in: " + error.code + " - " + error.message;
+                    alert("Email Sign-in Error: " + error.message);
+                });
+        }
+
+        function signInWithGoogle() {
+            if (!auth) { alert("Firebase auth not initialized."); return; }
+            const provider = new firebase.auth.GoogleAuthProvider();
+            // You can add scopes if needed, e.g., provider.addScope('profile'); provider.addScope('email');
+            
+            auth.signInWithPopup(provider) // Or signInWithRedirect(provider)
+                .then((result) => {
+                    const credential = result.credential;
+                    // This gives you a Google Access Token. You can use it to access the Google API.
+                    // const token = credential.accessToken; // Not the Firebase ID token
+                    const user = result.user;
+                    console.log("Signed in with Google successfully:", user);
+                    // The onAuthStateChanged listener will handle getting the Firebase ID token.
+                }).catch((error) => {
+                    console.error("Error signing in with Google:", error);
+                    idTokenTextarea.value = "Google Sign-in Error: " + error.code + " - " + error.message;
+                    alert("Google Sign-in Error: " + error.message + (error.email ? "\nEmail: " + error.email : "") + (error.credential ? "\nCredential: " + error.credential : ""));
+                });
+        }
+
+        function signOutUser() {
+            if (!auth) { alert("Firebase auth not initialized."); return; }
+            auth.signOut()
+                .then(() => console.log("Signed out successfully."))
+                .catch(error => {
+                    console.error("Error signing out:", error);
+                    alert("Sign-out Error: " + error.message);
+                });
+        }
+    </script>
+</body>
+</html>

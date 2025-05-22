@@ -1,0 +1,7 @@
+# Node.js / npm
+*/node_modules
+.env
+npm-debug.log*
+yarn-error.log
+server/config/sapariwar-2caf2-firebase-adminsdk-fbsvc-17d02b8cc5.json
+server/.env

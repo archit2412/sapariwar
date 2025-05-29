@@ -5,4 +5,4 @@ npm-debug.log*
 yarn-error.log
 
 server/.env
-server/sapariwar-2caf2-firebase-adminsdk-fbsvc-17d02b8cc5.json
+server\config\sapariwar-2caf2-firebase-adminsdk-fbsvc-17d02b8cc5.json

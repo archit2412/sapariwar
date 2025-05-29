@@ -1,0 +1,9 @@
+for tree creation - 
+http://localhost:5001/api/trees
+body -
+{
+  "name": "My Family Tree",
+  "description": "Created by signed-in user"
+}
+
+

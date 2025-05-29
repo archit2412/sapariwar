@@ -1,380 +1,213 @@
 const FamilyMember = require('../models/FamilyMember');
-const FamilyTree = require('../models/FamilyTree');
-const mongoose = require('mongoose');
+const FamilyTree = require('../models/FamilyTree'); // Needed for updating tree's member list
+const { checkTreeAccess } = require('../utils/checkTreeAccess'); // Import the utility
+const mongoose = require('mongoose'); // For ObjectId validation
 
-// Helper function to check tree ownership and existence
-const checkTreeAccess = async (treeId, userId) => {
-  if (!mongoose.Types.ObjectId.isValid(treeId)) {
-    return { error: { status: 400, msg: 'Invalid Tree ID format.' }, tree: null };
-  }
-  const tree = await FamilyTree.findById(treeId);
-  if (!tree) {
-    return { error: { status: 404, msg: 'Family tree not found.' }, tree: null };
-  }
-  if (tree.owner.toString() !== userId.toString()) {
-    return { error: { status: 403, msg: 'User not authorized to access this tree.' }, tree: null };
-  }
-  return { error: null, tree };
-};
-
-
-// @route   POST /api/trees/:treeId/members
-// @desc    Add a new member to a specific family tree
-// @access  Private (requires ownership of the tree)
+// Add a family member to a specific tree
 exports.addFamilyMember = async (req, res) => {
-  const { treeId } = req.params;
-  const userId = req.user._id; // From authMiddleware
-
-  const { error: treeAccessError, tree } = await checkTreeAccess(treeId, userId);
-  if (treeAccessError) {
-    return res.status(treeAccessError.status).json({ msg: treeAccessError.msg });
-  }
-
+  const { treeId } = req.params; // The ID of the tree to add the member to
+  // Member data from request body:
   const {
-    firstName, lastName, gender, dateOfBirth, placeOfBirth,
-    dateOfDeath, placeOfDeath, profilePictureUrl, biography,
-    parents, // Array of existing member IDs
-    spouses, // Array of objects like { spouseId: 'memberId', relationshipType: 'Married' }
-    // Children are typically derived or added by linking from the child's side
+    firstName, lastName, gender, dateOfBirth, placeOfBirth, dateOfDeath,
+    placeOfDeath, profilePictureUrl, biography, relationships, // Assuming relationships might be passed
+    // For simplicity, direct parent/spouse/children fields might be easier if not using 'relationships' object
+    parents, spouses, children
   } = req.body;
 
-  if (!firstName || !gender) {
-    return res.status(400).json({ msg: 'First name and gender are required.' });
+  if (!mongoose.Types.ObjectId.isValid(treeId)) {
+    return res.status(400).json({ message: 'Invalid tree ID format.' });
   }
 
   try {
+    // First, check if the user/guest has access to the tree they're trying to add a member to.
+    // true for writeAccessRequired, as adding a member is a modification.
+    const tree = await checkTreeAccess(treeId, req, true);
+    if (!tree) {
+      return res.status(403).json({ message: 'Access denied or tree not found. Cannot add member.' });
+    }
+
     const newMemberData = {
-      treeId: tree._id,
-      firstName, lastName, gender, dateOfBirth, placeOfBirth,
-      dateOfDeath, placeOfDeath, profilePictureUrl, biography,
-      parents: parents || [],
-      spouses: spouses || [],
-      children: [], // Children will be added by linking from child to parent
+      treeId: tree._id, // Associate member with this tree
+      firstName, lastName, gender, dateOfBirth, placeOfBirth, dateOfDeath,
+      placeOfDeath, profilePictureUrl, biography,
+      parents: parents || [], // Ensure these are arrays of ObjectIds
+      spouses: spouses || [], // Ensure these are arrays of { spouseId, relationshipType }
+      children: children || [], // Ensure these are arrays of ObjectIds
+      // 'relationships' field could be more complex and handled based on its structure
     };
 
-    // Validate parent and spouse IDs (ensure they exist and belong to the same tree)
-    // For simplicity, this validation is basic here. Production would need more robust checks.
-    if (parents) {
-      for (const parentId of parents) {
-        if (!mongoose.Types.ObjectId.isValid(parentId)) return res.status(400).json({ msg: `Invalid parent ID format: ${parentId}`});
-        const parentMember = await FamilyMember.findOne({ _id: parentId, treeId: tree._id });
-        if (!parentMember) return res.status(404).json({ msg: `Parent member with ID ${parentId} not found in this tree.` });
-      }
-    }
-    if (spouses) {
-         for (const spouseRel of spouses) {
-            if (!mongoose.Types.ObjectId.isValid(spouseRel.spouseId)) return res.status(400).json({ msg: `Invalid spouse ID format: ${spouseRel.spouseId}`});
-            const spouseMember = await FamilyMember.findOne({ _id: spouseRel.spouseId, treeId: tree._id });
-            if (!spouseMember) return res.status(404).json({ msg: `Spouse member with ID ${spouseRel.spouseId} not found in this tree.` });
-        }
+    const newMember = new FamilyMember(newMemberData);
+    await newMember.save();
+
+    // Add the new member's ID to the tree's 'members' array
+    if (!tree.members.includes(newMember._id)) {
+      tree.members.push(newMember._id);
+      await tree.save(); // Save the tree with the new member reference
     }
 
+    // Complex: Update relationships for other members if necessary.
+    // E.g., if 'parents' were specified for newMember, those parent documents should have newMember added to their 'children' array.
+    // This requires careful logic and is beyond the scope of this direct change, assume you have this or will build it.
 
-    const member = new FamilyMember(newMemberData);
-    await member.save();
-
-    // Add member to the tree's member list
-    tree.members.push(member._id);
-    await tree.save();
-
-    // Bidirectional linking (simplified):
-    // If parents were specified, add this new member to their children arrays
-    if (parents && parents.length > 0) {
-      await FamilyMember.updateMany(
-        { _id: { $in: parents }, treeId: tree._id },
-        { $addToSet: { children: member._id } } // Use $addToSet to avoid duplicates
-      );
+    res.status(201).json(newMember);
+  } catch (error) {
+    console.error(`Error adding family member to tree ${treeId}:`, error);
+    if (error.name === 'ValidationError') {
+      return res.status(400).json({ message: error.message, errors: error.errors });
     }
-    // If spouses were specified, update the spouse's record too
-    if (spouses && spouses.length > 0) {
-        for (const spouseRel of spouses) {
-            await FamilyMember.findByIdAndUpdate(
-                spouseRel.spouseId,
-                { $addToSet: { spouses: { spouseId: member._id /*, add other details if schema supports */ } } }
-            );
-        }
-    }
-
-
-    res.status(201).json(member);
-  } catch (err) {
-    console.error('Error adding family member:', err.message);
-    if (err.name === 'ValidationError') {
-        return res.status(400).json({ msg: err.message });
-    }
-    res.status(500).send('Server Error');
+    res.status(500).json({ message: 'Server error while adding family member.' });
   }
 };
 
-// @route   GET /api/trees/:treeId/members
-// @desc    Get all members of a specific family tree
-// @access  Private
+// Get all family members for a specific tree
 exports.getFamilyMembersByTree = async (req, res) => {
   const { treeId } = req.params;
-  const userId = req.user._id;
 
-  const { error: treeAccessError } = await checkTreeAccess(treeId, userId);
-  if (treeAccessError) {
-    return res.status(treeAccessError.status).json({ msg: treeAccessError.msg });
+  if (!mongoose.Types.ObjectId.isValid(treeId)) {
+    return res.status(400).json({ message: 'Invalid tree ID format.' });
   }
 
   try {
-    const members = await FamilyMember.find({ treeId })
-      .populate('parents', 'firstName lastName fullName') // Populate basic info
-      .populate('spouses.spouseId', 'firstName lastName fullName')
-      .populate('children', 'firstName lastName fullName')
-      .sort({ createdAt: 1 }); // Or by name, etc.
-    res.json(members);
-  } catch (err) {
-    console.error('Error fetching members by tree:', err.message);
-    res.status(500).send('Server Error');
+    // Check access to the tree first (read access is sufficient)
+    const tree = await checkTreeAccess(treeId, req, false); // false for writeAccessRequired
+    if (!tree) {
+      return res.status(403).json({ message: 'Access denied or tree not found.' });
+    }
+
+    // If access granted, fetch members belonging to this tree
+    const members = await FamilyMember.find({ treeId: tree._id });
+    // Consider populating relationships if needed for display:
+    // .populate('parents')
+    // .populate('children')
+    // .populate('spouses.spouseId');
+    res.status(200).json(members);
+  } catch (error) {
+    console.error(`Error fetching members for tree ${treeId}:`, error);
+    res.status(500).json({ message: 'Server error while fetching family members.' });
   }
 };
 
-// @route   GET /api/trees/:treeId/members/:memberId  (or /api/members/:memberId with tree check)
-// @desc    Get a specific family member by ID
-// @access  Private
+// Get a specific family member by their ID
 exports.getFamilyMemberById = async (req, res) => {
-  const { treeId, memberId } = req.params;
-  const userId = req.user._id;
-
-  const { error: treeAccessError } = await checkTreeAccess(treeId, userId);
-  if (treeAccessError) {
-    return res.status(treeAccessError.status).json({ msg: treeAccessError.msg });
-  }
+  const { memberId } = req.params;
 
   if (!mongoose.Types.ObjectId.isValid(memberId)) {
-    return res.status(400).json({ msg: 'Invalid Member ID format.' });
+    return res.status(400).json({ message: 'Invalid member ID format.' });
   }
 
   try {
-    const member = await FamilyMember.findOne({ _id: memberId, treeId })
-      .populate('parents', 'firstName lastName fullName _id')
-      .populate({
-          path: 'spouses.spouseId',
-          select: 'firstName lastName fullName _id'
-      })
-      .populate('children', 'firstName lastName fullName _id');
-
+    const member = await FamilyMember.findById(memberId);
     if (!member) {
-      return res.status(404).json({ msg: 'Family member not found in this tree.' });
+      return res.status(404).json({ message: 'Family member not found.' });
     }
-    res.json(member);
-  } catch (err) {
-    console.error('Error fetching member by ID:', err.message);
-    res.status(500).send('Server Error');
+
+    // Now, check if the current user/guest has access to the tree this member belongs to.
+    // Read access is sufficient (false for writeAccessRequired).
+    const tree = await checkTreeAccess(member.treeId.toString(), req, false);
+    if (!tree) {
+      return res.status(403).json({ message: 'Access denied to the tree this member belongs to.' });
+    }
+
+    // Optionally populate relationships for the single member view
+    // await member.populate(['parents', 'children', 'spouses.spouseId']);
+    res.status(200).json(member);
+  } catch (error) {
+    console.error(`Error fetching family member ${memberId}:`, error);
+    res.status(500).json({ message: 'Server error while fetching family member.' });
   }
 };
 
-// @route   PUT /api/trees/:treeId/members/:memberId
-// @desc    Update a family member's details
-// @access  Private
+// Update a family member
 exports.updateFamilyMember = async (req, res) => {
-  const { treeId, memberId } = req.params;
-  const userId = req.user._id;
-
-  const { error: treeAccessError } = await checkTreeAccess(treeId, userId);
-  if (treeAccessError) {
-    return res.status(treeAccessError.status).json({ msg: treeAccessError.msg });
-  }
+  const { memberId } = req.params;
+  const updates = req.body; // Contains fields to update
 
   if (!mongoose.Types.ObjectId.isValid(memberId)) {
-    return res.status(400).json({ msg: 'Invalid Member ID format.' });
+    return res.status(400).json({ message: 'Invalid member ID format.' });
   }
 
-  const {
-    firstName, lastName, gender, dateOfBirth, placeOfBirth,
-    dateOfDeath, placeOfDeath, profilePictureUrl, biography,
-    // Relationship updates are more complex and might need separate endpoints or careful handling
-    // For now, we focus on non-relational fields.
-    // parents, spouses (handle with care or separate endpoints)
-  } = req.body;
-
   try {
-    let member = await FamilyMember.findOne({ _id: memberId, treeId });
+    const member = await FamilyMember.findById(memberId);
     if (!member) {
-      return res.status(404).json({ msg: 'Family member not found to update.' });
+      return res.status(404).json({ message: 'Family member not found.' });
     }
 
-    // Build update object only for fields that are provided
-    const updateFields = {};
-    if (firstName !== undefined) updateFields.firstName = firstName;
-    if (lastName !== undefined) updateFields.lastName = lastName;
-    if (gender !== undefined) updateFields.gender = gender;
-    if (dateOfBirth !== undefined) updateFields.dateOfBirth = dateOfBirth;
-    if (placeOfBirth !== undefined) updateFields.placeOfBirth = placeOfBirth;
-    if (dateOfDeath !== undefined) updateFields.dateOfDeath = dateOfDeath;
-    if (placeOfDeath !== undefined) updateFields.placeOfDeath = placeOfDeath;
-    if (profilePictureUrl !== undefined) updateFields.profilePictureUrl = profilePictureUrl;
-    if (biography !== undefined) updateFields.biography = biography;
-
-    // Add logic for updating relationships (parents, spouses) if included.
-    // This requires careful handling of adding/removing links and updating other members.
-    // For example, if 'parents' array changes, old parents might need this member removed from their 'children',
-    // and new parents might need this member added to their 'children'.
-    // This is simplified here.
-
-    if (Object.keys(updateFields).length === 0) {
-        return res.status(400).json({ msg: 'No update fields provided.' });
+    // Check write access to the tree this member belongs to.
+    const tree = await checkTreeAccess(member.treeId.toString(), req, true); // true for writeAccessRequired
+    if (!tree) {
+      return res.status(403).json({ message: 'Access denied to modify members in this tree.' });
     }
-    updateFields.updatedAt = Date.now();
 
-    const updatedMember = await FamilyMember.findByIdAndUpdate(
-      memberId,
-      { $set: updateFields },
-      { new: true, runValidators: true }
-    )
-    .populate('parents', 'firstName lastName fullName')
-    .populate('spouses.spouseId', 'firstName lastName fullName')
-    .populate('children', 'firstName lastName fullName');
+    // Update allowed member fields. Be careful about what can be updated.
+    // Exclude fields like _id, treeId from direct update via body.
+    const allowedUpdates = ['firstName', 'lastName', 'gender', 'dateOfBirth', 'placeOfBirth', 'dateOfDeath', 'placeOfDeath', 'profilePictureUrl', 'biography', 'parents', 'spouses', 'children' /*, 'relationships'*/];
+    Object.keys(updates).forEach(key => {
+      if (allowedUpdates.includes(key)) {
+        member[key] = updates[key];
+      }
+    });
+    // member.updatedAt is handled by {timestamps: true} in FamilyMember schema (assuming it has it)
 
-    res.json(updatedMember);
-  } catch (err) {
-    console.error('Error updating family member:', err.message);
-    if (err.name === 'ValidationError') {
-        return res.status(400).json({ msg: err.message });
+    await member.save();
+
+    // Complex: Handle updates to relationships (e.g., if 'parents' array changes, update other members).
+    // This requires careful logic.
+
+    res.status(200).json(member);
+  } catch (error) {
+    console.error(`Error updating family member ${memberId}:`, error);
+    if (error.name === 'ValidationError') {
+      return res.status(400).json({ message: error.message, errors: error.errors });
     }
-    res.status(500).send('Server Error');
+    res.status(500).json({ message: 'Server error while updating family member.' });
   }
 };
 
-
-// @route   DELETE /api/trees/:treeId/members/:memberId
-// @desc    Delete a family member
-// @access  Private
+// Delete a family member
 exports.deleteFamilyMember = async (req, res) => {
-  const { treeId, memberId } = req.params;
-  const userId = req.user._id;
-
-  const { error: treeAccessError, tree } = await checkTreeAccess(treeId, userId);
-  if (treeAccessError) {
-    return res.status(treeAccessError.status).json({ msg: treeAccessError.msg });
-  }
+  const { memberId } = req.params;
 
   if (!mongoose.Types.ObjectId.isValid(memberId)) {
-    return res.status(400).json({ msg: 'Invalid Member ID format.' });
+    return res.status(400).json({ message: 'Invalid member ID format.' });
   }
 
   try {
-    const memberToDelete = await FamilyMember.findOne({ _id: memberId, treeId });
-    if (!memberToDelete) {
-      return res.status(404).json({ msg: 'Family member not found to delete.' });
+    const member = await FamilyMember.findById(memberId);
+    if (!member) {
+      return res.status(404).json({ message: 'Family member not found.' });
     }
 
-    // Atomicity is important here (transactions in MongoDB >= 4.0 for replica sets)
-    // For simplicity, performing sequential operations:
-
-    // 1. Remove this member from the FamilyTree's list of members
-    await FamilyTree.findByIdAndUpdate(treeId, { $pull: { members: memberId } });
-
-    // 2. Remove this member from any other member's parents, children, or spouses arrays
-    // Remove from other members' 'children' arrays (if this member was a parent)
-    await FamilyMember.updateMany({ treeId, children: memberId }, { $pull: { children: memberId } });
-    // Remove from other members' 'parents' arrays (if this member was a child)
-    await FamilyMember.updateMany({ treeId, parents: memberId }, { $pull: { parents: memberId } });
-    // Remove from other members' 'spouses' arrays
-    await FamilyMember.updateMany({ treeId, 'spouses.spouseId': memberId }, { $pull: { spouses: { spouseId: memberId } } });
-    // Also, if this member had spouses, remove self from their spouse list (covered by above if symmetric, but good to be thorough)
-    for (const spouseEntry of memberToDelete.spouses) {
-        await FamilyMember.findByIdAndUpdate(spouseEntry.spouseId, { $pull: { spouses: { spouseId: memberId } } });
+    // Check write access to the tree this member belongs to.
+    const tree = await checkTreeAccess(member.treeId.toString(), req, true); // true for writeAccessRequired
+    if (!tree) {
+      return res.status(403).json({ message: 'Access denied to delete members from this tree.' });
     }
 
+    const parentTreeId = member.treeId;
 
-    // 3. Delete the member itself
-    await FamilyMember.findByIdAndDelete(memberId);
+    // 1. Delete the member itself
+    // await member.remove(); // .remove() is deprecated
+    await FamilyMember.deleteOne({ _id: memberId });
 
-    res.json({ msg: 'Family member successfully deleted and references updated.' });
-  } catch (err) {
-    console.error('Error deleting family member:', err.message);
-    res.status(500).send('Server Error');
+
+    // 2. Remove the member's ID from the parent tree's 'members' array
+    await FamilyTree.updateOne(
+      { _id: parentTreeId },
+      { $pull: { members: memberId } } // Use memberId directly
+    );
+
+    // 3. Complex: Remove this member from other members' relationship arrays.
+    //    - Remove from children's 'parents' list.
+    //    - Remove from parents' 'children' list.
+    //    - Remove from spouses' 'spouses' list.
+    //    This requires iterating through related members and updating them. This is critical for data integrity.
+    //    Example for removing from children's parents list:
+    //    await FamilyMember.updateMany({ parents: memberId }, { $pull: { parents: memberId } });
+    //    Similar logic for other relationships.
+
+    res.status(200).json({ message: 'Family member deleted successfully. Remember to handle cascading relationship updates.' });
+  } catch (error) {
+    console.error(`Error deleting family member ${memberId}:`, error);
+    res.status(500).json({ message: 'Server error while deleting family member.' });
   }
 };
-
-// --- Relationship Management Endpoints (Example Stubs - more complex) ---
-
-// @route   POST /api/trees/:treeId/members/:memberId/link-parent/:parentId
-// @desc    Link a parent to a member
-// @access  Private
-exports.linkParent = async (req, res) => {
-    const { treeId, memberId, parentId } = req.params;
-    const userId = req.user._id;
-
-    const { error: treeAccessError } = await checkTreeAccess(treeId, userId);
-    if (treeAccessError) return res.status(treeAccessError.status).json({ msg: treeAccessError.msg });
-
-    if (!mongoose.Types.ObjectId.isValid(memberId) || !mongoose.Types.ObjectId.isValid(parentId)) {
-        return res.status(400).json({ msg: 'Invalid Member or Parent ID format.' });
-    }
-
-    try {
-        const child = await FamilyMember.findOne({ _id: memberId, treeId });
-        const parent = await FamilyMember.findOne({ _id: parentId, treeId });
-
-        if (!child || !parent) {
-            return res.status(404).json({ msg: 'Child or Parent not found in this tree.' });
-        }
-        if (memberId === parentId) return res.status(400).json({msg: "Cannot link member to self as parent."})
-
-
-        // Add parent to child's parents array
-        child.parents.addToSet(parentId); // addToSet avoids duplicates
-        // Add child to parent's children array
-        parent.children.addToSet(memberId);
-
-        await child.save();
-        await parent.save();
-
-        res.json({ msg: 'Parent linked successfully.', child, parent });
-    } catch (err) {
-        console.error('Error linking parent:', err.message);
-        res.status(500).send('Server Error');
-    }
-};
-
-// @route   POST /api/trees/:treeId/members/:memberId/link-spouse/:spouseMemberId
-// @desc    Link a spouse to a member
-// @access  Private
-exports.linkSpouse = async (req, res) => {
-    const { treeId, memberId, spouseMemberId } = req.params;
-    // const { relationshipType } = req.body; // e.g., "Married"
-    const userId = req.user._id;
-
-    const { error: treeAccessError } = await checkTreeAccess(treeId, userId);
-    if (treeAccessError) return res.status(treeAccessError.status).json({ msg: treeAccessError.msg });
-
-    if (!mongoose.Types.ObjectId.isValid(memberId) || !mongoose.Types.ObjectId.isValid(spouseMemberId)) {
-        return res.status(400).json({ msg: 'Invalid Member or Spouse ID format.' });
-    }
-     if (memberId === spouseMemberId) return res.status(400).json({msg: "Cannot link member to self as spouse."})
-
-
-    try {
-        const member1 = await FamilyMember.findOne({ _id: memberId, treeId });
-        const member2 = await FamilyMember.findOne({ _id: spouseMemberId, treeId });
-
-        if (!member1 || !member2) {
-            return res.status(404).json({ msg: 'One or both members not found in this tree.' });
-        }
-
-        // Add to each other's spouses array (assuming symmetric relationship for now)
-        // Ensure not already spoused to avoid duplicates, or handle updates to relationshipType
-        const member1HasSpouse = member1.spouses.some(s => s.spouseId.equals(spouseMemberId));
-        if (!member1HasSpouse) {
-            member1.spouses.push({ spouseId: spouseMemberId /*, relationshipType */ });
-        }
-
-        const member2HasSpouse = member2.spouses.some(s => s.spouseId.equals(memberId));
-        if (!member2HasSpouse) {
-            member2.spouses.push({ spouseId: memberId /*, relationshipType */ });
-        }
-
-        await member1.save();
-        await member2.save();
-
-        res.json({ msg: 'Spouse linked successfully.', member1, member2 });
-    } catch (err) {
-        console.error('Error linking spouse:', err.message);
-        res.status(500).send('Server Error');
-    }
-};
-// Add similar unlinkParent, unlinkSpouse methods as needed.

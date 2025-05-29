@@ -15,7 +15,7 @@ router.post('/', authMiddleware, treeController.createFamilyTree);
 
 // @route   GET /api/trees
 // @desc    Get all family trees for the logged-in user
-router.get('/', authMiddleware, treeController.getMyFamilyTrees);
+router.get('/', authMiddleware, treeController.getAllFamilyTreesForUser); // << UPDATED THIS LINE
 
 // LMP 2. Mount member routes for a specific tree
 // This will make routes like /api/trees/:treeId/members/... available

@@ -14,50 +14,34 @@ const FamilyTreeSchema = new Schema({
   owner: { // The user who created and owns this tree
     type: Schema.Types.ObjectId,
     ref: 'User', // References the 'User' model
-    required: true,
-    index: true, // Index for faster queries on owner
+    index: true,
   },
-  members: [{ // An array of ObjectIds referencing the FamilyMember model
+  guestSessionId: { // For trees created by guests before login/signup
+    type: String,
+    index: true,
+    sparse: true, // Allows multiple nulls; uniqueness managed by controller logic for active sessions.
+  },
+  members: [{
     type: Schema.Types.ObjectId,
     ref: 'FamilyMember',
   }],
-  // We can add more specific rootMember or similar if needed for visualization later
-  // rootMember: {
-  //   type: Schema.Types.ObjectId,
-  //   ref: 'FamilyMember'
-  // },
   privacy: {
     type: String,
-    enum: ['private', 'public_link', 'public'], // 'public' might be a future addition
+    enum: ['private', 'public_link', 'public'],
     default: 'private',
   },
-  shareableLink: { // For 'public_link' privacy setting
+  shareableLink: {
     type: String,
     unique: true,
-    sparse: true, // Allows multiple nulls, but unique if value exists
+    sparse: true,
   },
-  createdAt: {
-    type: Date,
-    default: Date.now,
-  },
-  updatedAt: {
-    type: Date,
-    default: Date.now,
-  },
-});
+}, { timestamps: true }); // Mongoose option for automatic createdAt/updatedAt
 
-// Middleware to update `updatedAt` field before saving
-FamilyTreeSchema.pre('save', function(next) {
-  this.updatedAt = Date.now();
-  // Potentially generate a shareableLink if privacy is 'public_link' and link doesn't exist
-  // For now, we'll handle link generation in the route/controller logic for simplicity
-  next();
-});
-
-// Ensure that a tree has an owner before saving (though 'required: true' handles this)
+// Validation to ensure a tree has an owner OR a guestSessionId, but not both.
+// Controller logic is responsible for ensuring at least one is set upon creation.
 FamilyTreeSchema.pre('validate', function(next) {
-  if (!this.owner) {
-    next(new Error('A family tree must have an owner.'));
+  if (this.owner && this.guestSessionId) {
+    next(new Error('A family tree cannot have both an owner and a guest session ID.'));
   } else {
     next();
   }

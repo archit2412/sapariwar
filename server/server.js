@@ -1,60 +1,64 @@
-require('dotenv').config();
 const express = require('express');
+const mongoose = require('mongoose');
 const cors = require('cors');
-const connectDB = require('./config/db');
-const admin = require('firebase-admin');
+require('dotenv').config();
 
+// Import middleware
+const authMiddleware = require('./middleware/authMiddleware'); // Your modified authMiddleware
+
+// Import routes
 const authRoutes = require('./routes/authRoutes');
-// LMP 1. Import tree routes
 const treeRoutes = require('./routes/treeRoutes');
-
-
-// Initialize Firebase Admin SDK
-try {
-  if (process.env.GOOGLE_APPLICATION_CREDENTIALS) {
-    admin.initializeApp({
-      credential: admin.credential.applicationDefault(),
-    });
-    console.log('Firebase Admin SDK initialized with service account file.');
-  } else if (process.env.FIREBASE_PROJECT_ID) {
-    admin.initializeApp({
-      credential: admin.credential.cert({
-        projectId: process.env.FIREBASE_PROJECT_ID,
-        privateKeyId: process.env.FIREBASE_PRIVATE_KEY_ID,
-        privateKey: process.env.FIREBASE_PRIVATE_KEY.replace(/\\n/g, '\n'),
-        clientEmail: process.env.FIREBASE_CLIENT_EMAIL,
-        clientId: process.env.FIREBASE_CLIENT_ID,
-      }),
-    });
-    console.log('Firebase Admin SDK initialized with individual environment variables.');
-  } else {
-    console.error('Firebase Admin SDK Credentials not found. Please set GOOGLE_APPLICATION_CREDENTIALS or individual FIREBASE_... variables in .env');
-  }
-} catch (error) {
-  console.error('Firebase Admin SDK Initialization Error:', error);
-}
+const memberRoutes = require('./routes/memberRoutes');
+const guestSessionRoutes = require('./routes/guestSessionRoutes'); // << ADDED: Import new guest routes
 
 const app = express();
 
-connectDB();
-
+// Basic Middleware
 app.use(cors());
-app.use(express.json());
+app.use(express.json()); // For parsing application/json
 
-app.get('/', (req, res) => {
-    res.send('Sapariwar API Running');
+// --- IMPORTANT: Apply authMiddleware globally ---
+// This middleware will attempt to populate req.user (if token provided)
+// or req.guestSessionId (if 'x-guest-session-id' header provided)
+// for all subsequent routes.
+app.use(authMiddleware); // << ADDED/MODIFIED: Ensure this is present and correctly placed
+
+// API Routes
+// These routes will now have req.user or req.guestSessionId potentially populated
+// by the global authMiddleware.
+app.use('/api/auth', authRoutes); // For login, signup, etc.
+app.use('/api/trees', treeRoutes); // For tree-related operations
+app.use('/api/members', memberRoutes); // For member-related operations
+app.use('/api/guest-sessions', guestSessionRoutes); // << ADDED: Register guest session routes
+
+// Default error handler (optional, but good practice)
+app.use((err, req, res, next) => {
+  console.error(err.stack);
+  res.status(500).send('Something broke!');
 });
 
-// Define API Routes
-app.use('/api/auth', authRoutes);
-// LMP 2. Mount the tree routes
-app.use('/api/trees', treeRoutes); // All routes in treeRoutes will be prefixed with /api/trees and use authMiddleware as defined within treeRoutes.js
+// Database Connection
+// Ensure your MONGODB_URI is correctly set in your .env file
+mongoose.connect(process.env.MONGODB_URI, {
+  // useNewUrlParser: true, // Deprecated
+  // useUnifiedTopology: true, // Deprecated
+  // useCreateIndex: true, // Not supported
+  // useFindAndModify: false, // Not supported
+  // Mongoose 6+ these are default and/or not needed.
+  // If using older Mongoose, you might need them.
+})
+.then(() => console.log('MongoDB Connected Successfully.'))
+.catch(err => {
+  console.error('MongoDB Connection Error:', err.message);
+  // process.exit(1); // Optionally exit if DB connection fails
+});
 
-// We'll add these later:
-// const memberRoutes = require('./routes/memberRoutes');
-// app.use('/api/members', authMiddleware, memberRoutes);
+const PORT = process.env.PORT || 5000;
+app.listen(PORT, () => {
+  console.log(`Server running on port ${PORT}`);
+  console.log(`Access local: http://localhost:${PORT}`);
+});
 
-
-const PORT = process.env.PORT || 5001;
-
-app.listen(PORT, () => console.log(`Server started on port ${PORT}`));
+// For testing purposes if you import 'app' elsewhere (e.g. in test files)
+module.exports = app;

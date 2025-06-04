@@ -11,15 +11,15 @@ const FamilyTreeSchema = new Schema({
     type: String,
     trim: true,
   },
-  owner: { // The user who created and owns this tree
+  owner: {
     type: Schema.Types.ObjectId,
-    ref: 'User', // References the 'User' model
+    ref: 'User',
     index: true,
   },
-  guestSessionId: { // For trees created by guests before login/signup
+  guestSessionId: {
     type: String,
     index: true,
-    sparse: true, // Allows multiple nulls; uniqueness managed by controller logic for active sessions.
+    sparse: true,
   },
   members: [{
     type: Schema.Types.ObjectId,
@@ -35,10 +35,8 @@ const FamilyTreeSchema = new Schema({
     unique: true,
     sparse: true,
   },
-}, { timestamps: true }); // Mongoose option for automatic createdAt/updatedAt
+}, { timestamps: true });
 
-// Validation to ensure a tree has an owner OR a guestSessionId, but not both.
-// Controller logic is responsible for ensuring at least one is set upon creation.
 FamilyTreeSchema.pre('validate', function(next) {
   if (this.owner && this.guestSessionId) {
     next(new Error('A family tree cannot have both an owner and a guest session ID.'));

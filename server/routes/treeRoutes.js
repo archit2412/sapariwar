@@ -2,10 +2,7 @@ const express = require('express');
 const router = express.Router();
 const treeController = require('../controllers/treeController');
 const authMiddleware = require('../middleware/authMiddleware');
-
-// LMP 1. Import member routes
 const memberRoutes = require('./memberRoutes');
-
 
 // All routes in this file will be protected by authMiddleware
 
@@ -15,27 +12,26 @@ router.post('/', authMiddleware, treeController.createFamilyTree);
 
 // @route   GET /api/trees
 // @desc    Get all family trees for the logged-in user
-router.get('/', authMiddleware, treeController.getAllFamilyTreesForUser); // << UPDATED THIS LINE
+router.get('/', authMiddleware, treeController.getAllFamilyTreesForUser);
 
-// LMP 2. Mount member routes for a specific tree
-// This will make routes like /api/trees/:treeId/members/... available
+// Mount member routes for members of a specific tree
 router.use('/:treeId/members', memberRoutes);
-
-
+router.use('/:treeId/members', memberRoutes);
 // @route   GET /api/trees/:treeId
 // @desc    Get a specific family tree by ID
-// @access  Private
 router.get('/:treeId', authMiddleware, treeController.getFamilyTreeById);
 
 // @route   PUT /api/trees/:treeId
 // @desc    Update a family tree
-// @access  Private
 router.put('/:treeId', authMiddleware, treeController.updateFamilyTree);
 
 // @route   DELETE /api/trees/:treeId
 // @desc    Delete a family tree
-// @access  Private
 router.delete('/:treeId', authMiddleware, treeController.deleteFamilyTree);
 
+// @route   POST /api/trees/createWithInitialMembers
+// @desc    Create a tree with self, mother, father together
+router.post('/createWithInitialMembers', authMiddleware, treeController.createTreeWithInitialMembers);
+router.use('/:treeId/members', memberRoutes);
 
 module.exports = router;

@@ -16,7 +16,7 @@ router.get('/', authMiddleware, treeController.getAllFamilyTreesForUser);
 
 // Mount member routes for members of a specific tree
 router.use('/:treeId/members', memberRoutes);
-router.use('/:treeId/members', memberRoutes);
+
 // @route   GET /api/trees/:treeId
 // @desc    Get a specific family tree by ID
 router.get('/:treeId', authMiddleware, treeController.getFamilyTreeById);
@@ -32,6 +32,5 @@ router.delete('/:treeId', authMiddleware, treeController.deleteFamilyTree);
 // @route   POST /api/trees/createWithInitialMembers
 // @desc    Create a tree with self, mother, father together
 router.post('/createWithInitialMembers', authMiddleware, treeController.createTreeWithInitialMembers);
-router.use('/:treeId/members', memberRoutes);
 
 module.exports = router;

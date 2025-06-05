@@ -18,14 +18,21 @@ const app = express();
 app.use(cors());
 app.use(express.json()); // Parses application/json
 
-// Global authentication/session middleware
+// Public routes (no auth)
+app.use('/api/auth', authRoutes);
+app.use('/api/guest-sessions', guestSessionRoutes);
+
+// Authenticated routes (add authMiddleware here or inside the router files)
 app.use(authMiddleware); // Sets req.user or req.guestSessionId
 
-// Routes
-app.use('/api/auth', authRoutes);
+// Only mount treeRoutes here; it will handle nesting for /api/trees/:treeId/members internally
 app.use('/api/trees', treeRoutes);
+
+// If you want a flat `/api/members` route (not nested), keep this:
 app.use('/api/members', memberRoutes);
-app.use('/api/guest-sessions', guestSessionRoutes);
+
+// --- DO NOT mount memberRoutes directly for nested usage here ---
+// app.use('/api/trees/:treeId/members', memberRoutes);
 
 // Error handler
 app.use((err, req, res, next) => {

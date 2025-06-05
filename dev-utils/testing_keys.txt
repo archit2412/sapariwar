@@ -5,5 +5,3 @@ body -
   "name": "My Family Tree",
   "description": "Created by signed-in user"
 }
-
-
